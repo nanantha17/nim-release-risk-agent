@@ -1,0 +1,57 @@
+functions:
+  get_pr_velocity:
+    _type: get_pr_velocity
+  get_lines_of_code_changed:
+    _type: get_lines_of_code_changed
+  get_unique_contributor_count:
+    _type: get_unique_contributor_count
+  score_release_risk:
+    _type: score_release_risk
+    api_url: "http://localhost:8000/predict"
+
+llms:
+  release_llm:
+    _type: nim
+    model_name: meta/llama-3.1-70b-instruct
+    temperature: 0.2
+    max_tokens: 1024
+
+workflow:
+  _type: react_agent
+  llm_name: release_llm
+  tool_names: [get_pr_velocity, get_lines_of_code_changed, get_unique_contributor_count, score_release_risk]
+  system_prompt: |
+    You are a release readiness assistant. Given a GitHub repo, gather signals
+    using the available tools, map them to release risk metrics using sensible
+    defaults for fields the tools can't provide (test_coverage=70, code_coverage=70,
+    branch_coverage=70, past_defects_total=5, critical_defects=0,
+    defect_resolution_rate=90, cyclomatic_complexity=10, build_success_rate=90,
+    avg_pr_review_time_hours=24, open_issues=10), then call score_release_risk
+    with the mapped metrics. Present the result as a Go/NoGo assessment citing
+    the specific signals that drove the score.
+
+    You have access to the following tools:
+
+    {tools}
+
+    Use the following format:
+
+    Question: the input question you must answer
+    Thought: you should always think about what to do
+    Action: the action to take, should be one of [{tool_names}]
+    Action Input: the input to the action
+    Observation: the result of the action
+    ... (this Thought/Action/Action Input/Observation can repeat N times)
+    Thought: I now know the final answer
+    Final Answer: the final answer to the original input question
+
+    Previous conversation history:
+    {chat_history}
+
+    Begin!
+
+    Question: {question}
+    Thought:{agent_scratchpad}
+  verbose: true
+  max_iterations: 10
+  parse_agent_response_max_retries: 3

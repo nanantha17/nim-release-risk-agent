@@ -1,0 +1,14 @@
+[project]
+name = "release_copilot"
+version = "0.1.0"
+dependencies = [
+    "nvidia-nat",
+    "requests",
+    "pydantic",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.entry-points.'nat.components']
+release_copilot = "release_copilot"
