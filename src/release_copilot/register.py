@@ -7,6 +7,11 @@ from nat.cli.register_workflow import register_function
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+from nat.builder.evaluator import EvaluatorInfo
+from nat.builder.framework_enum import LLMFrameworkEnum
+from nat.cli.register_workflow import register_evaluator
+from nat.data_models.evaluator import EvalInput, EvaluatorLLMConfig
+
 
 def _fetch_raw_stats(repo: str, max_commits: int) -> dict:
     """Helper to fetch and aggregate raw commit data from GitHub."""
@@ -54,29 +59,27 @@ async def get_pr_velocity_tool(config: GetPRVelocityConfig, builder: Builder):
         description="Returns recent closed PR count for a GitHub repo as a proxy for PR merge velocity."
     )
 
-
-class GetLinesChangedConfig(FunctionBaseConfig, name="get_lines_of_code_changed"):
+class GetCommitStatsConfig(FunctionBaseConfig, name="get_commit_stats"):
     max_commits: int = Field(default=10, description="Number of commits to scan")
 
-@register_function(config_type=GetLinesChangedConfig)
-async def get_lines_changed_tool(config: GetLinesChangedConfig, builder: Builder):
+@register_function(config_type=GetCommitStatsConfig)
+async def get_commit_stats_tool(config: GetCommitStatsConfig, builder: Builder):
     async def _wrapper(repo: str) -> dict:
         stats = _fetch_raw_stats(repo, config.max_commits)
-        return {"repo": repo, "total_lines_changed": stats.get("added", 0) + stats.get("deleted", 0)}
-    yield FunctionInfo.from_fn(_wrapper, input_schema=RepoInput,
-        description="Returns total lines of code changed (additions + deletions) for a repository.")
-
-class GetContributorCountConfig(FunctionBaseConfig, name="get_unique_contributor_count"):
-    max_commits: int = Field(default=10, description="Number of commits to scan")
-
-@register_function(config_type=GetContributorCountConfig)
-async def get_contributor_count_tool(config: GetContributorCountConfig, builder: Builder):
-    async def _wrapper(repo: str) -> dict:
-        stats = _fetch_raw_stats(repo, config.max_commits)
-        return {"repo": repo, "num_contributors": stats.get("authors", 0)}
-    yield FunctionInfo.from_fn(_wrapper, input_schema=RepoInput,
-        description="Returns the number of unique contributors active in recent commits.")
-
+        return {
+            "repo": repo,
+            "total_lines_changed": stats.get("added", 0) + stats.get("deleted", 0),
+            "num_contributors": stats.get("authors", 0),
+        }
+    yield FunctionInfo.from_fn(
+        _wrapper,
+        input_schema=RepoInput,
+        description=(
+            "Returns both total lines of code changed (additions + deletions) "
+            "and the number of unique contributors active in recent commits, "
+            "from a single GitHub API scan."
+        ),
+    )
 
 
 class ReleaseMetricsInput(BaseModel):
@@ -131,3 +134,46 @@ async def score_release_risk_tool(config: ScoreReleaseRiskConfig, builder: Build
             "for anything not directly available."
         ),
     )
+
+#Evaluation harness
+class GroundedCorrectnessConfig(EvaluatorLLMConfig, name="grounded_correctness"):
+    """LLM-judge evaluator: does the response correctly and specifically answer
+    the question, grounded in real tool output, without unnecessary scope creep?"""
+    pass
+@register_evaluator(config_type=GroundedCorrectnessConfig)
+async def register_grounded_correctness(config: GroundedCorrectnessConfig, builder):
+    from nat.plugins.eval.data_models.evaluator_io import EvalOutput, EvalOutputItem
+
+    llm = await builder.get_llm(config.llm_name, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
+
+    async def evaluate_fn(eval_input: EvalInput) -> EvalOutput:
+        items = []
+        total = 0.0
+        for item in eval_input.eval_input_items:
+            question = item.input_obj
+            reference = item.expected_output_obj
+            response = item.output_obj
+
+            prompt = (
+                f"Question asked: {question}\n\n"
+                f"Criteria for a correct answer: {reference}\n\n"
+                f"Agent's actual response: {response}\n\n"
+                "Does the agent's response meet the criteria? Reply with exactly "
+                "'PASS' or 'FAIL' on the first line, then a one-sentence reason "
+                "on the second line."
+            )
+            result = await llm.ainvoke(prompt)
+            text = result.content if hasattr(result, "content") else str(result)
+            lines = text.strip().split("\n")
+            verdict = lines[0].strip().upper()
+            reason = lines[1] if len(lines) > 1 else ""
+
+            score = 1.0 if "PASS" in verdict else 0.0
+            total += score
+            items.append(EvalOutputItem(id=item.id, score=score, reasoning=reason))
+
+        avg = total / len(items) if items else 0.0
+        return EvalOutput(average_score=avg, eval_output_items=items)
+
+    yield EvaluatorInfo(config=config, evaluate_fn=evaluate_fn,
+                        description="LLM-judge evaluator for grounded, scoped correctness")

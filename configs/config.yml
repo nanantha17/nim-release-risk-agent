@@ -1,10 +1,17 @@
+general:
+  telemetry:
+    tracing:
+      phoenix:
+        _type: phoenix
+        endpoint: http://localhost:6006/v1/traces
+        project: nim_release_risk_agent
+
+
 functions:
   get_pr_velocity:
     _type: get_pr_velocity
-  get_lines_of_code_changed:
-    _type: get_lines_of_code_changed
-  get_unique_contributor_count:
-    _type: get_unique_contributor_count
+  get_commit_stats:
+    _type: get_commit_stats
   score_release_risk:
     _type: score_release_risk
     api_url: "http://localhost:8000/predict"
@@ -15,11 +22,13 @@ llms:
     model_name: meta/llama-3.1-70b-instruct
     temperature: 0.2
     max_tokens: 1024
+    num_retries: 10
+    retry_on_status_codes: [429, 503]
 
 workflow:
   _type: react_agent
   llm_name: release_llm
-  tool_names: [get_pr_velocity, get_lines_of_code_changed, get_unique_contributor_count, score_release_risk]
+  tool_names: [get_pr_velocity, get_commit_stats,score_release_risk]
   system_prompt: |
     You are a release readiness assistant. Given a GitHub repo, gather signals
     using the available tools, map them to release risk metrics using sensible
@@ -29,13 +38,19 @@ workflow:
     avg_pr_review_time_hours=24, open_issues=10), then call score_release_risk
     with the mapped metrics. Present the result as a Go/NoGo assessment citing
     the specific signals that drove the score.
-
+    If the user asks about a specific signal only (e.g. PR velocity, contributor
+    count, lines changed), answer with that specific tool's result directly —
+    do not run the full risk-scoring pipeline. Only call score_release_risk
+    when the user asks for an overall release risk, readiness, or Go/NoGo
+    assessment.
+    IMPORTANT: When you have gathered enough information to answer, respond
+    with ONLY a Final Answer — do not include an Action or Action Input line
+    in the same response. Never write "Action: None"
     You have access to the following tools:
 
     {tools}
-
     Use the following format:
-
+    
     Question: the input question you must answer
     Thought: you should always think about what to do
     Action: the action to take, should be one of [{tool_names}]
@@ -55,3 +70,19 @@ workflow:
   verbose: true
   max_iterations: 10
   parse_agent_response_max_retries: 3
+
+eval:
+  general:
+    max_concurrency: 1
+    output_dir: .tmp/nat/release_copilot/eval
+    dataset:
+      _type: json
+      file_path: C:/Users/Deepu/PycharmProjects/nat-release-copilot/data/eval_dataset.json
+      structure:
+        question_key: user_input
+        answer_key: reference
+
+  evaluators:
+    grounded_correctness:
+      _type: grounded_correctness
+      llm_name: release_llm
