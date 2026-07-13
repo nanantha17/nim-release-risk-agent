@@ -28,23 +28,8 @@ Given a natural-language question like *"What's the release risk for microsoft/v
 
 ## Architecture
 
-```
-User question (CLI / nat run)
-        |
-        v
-NAT ReAct Agent
-LLM: NVIDIA NIM - meta/llama-3.1-70b-instruct
-Traced via Phoenix (OpenTelemetry)
-        |
-        |-- get_pr_velocity   (GitHub REST API)
-        |-- get_commit_stats  (GitHub REST API)
-        |-- score_release_risk -> POST /predict
-                    |
-                    v
-        Risk Predictor API (FastAPI)
-        PyTorch + Sklearn + DistilBERT ensemble
-        -> risk score, level, confidence, explained factors
-```
+<img width="1884" height="1075" alt="NIM_Rel_Agent" src="https://github.com/user-attachments/assets/b6c961c0-c25c-4930-8064-ec077a3ce176" />
+
 
 ---
 
@@ -78,6 +63,7 @@ Every run is traced end-to-end with [Arize Phoenix](https://phoenix.arize.com/),
 | `get_lines_of_code_changed`: 9.5s / `get_unique_contributor_count`: 9.7s | `get_commit_stats`: 9.7s |
 
 ---
+<img width="1169" height="880" alt="NIM_agent" src="https://github.com/user-attachments/assets/52bc242b-1684-48f4-8f39-db0608bb5e24" />
 
 ## Evaluation
 
