@@ -77,7 +77,7 @@ eval:
     output_dir: .tmp/nat/release_copilot/eval
     dataset:
       _type: json
-      file_path: C:/Users/Deepu/PycharmProjects/nat-release-copilot/data/eval_dataset.json
+      file_path: /nat-release-copilot/data/eval_dataset.json
       structure:
         question_key: user_input
         answer_key: reference
